@@ -1697,11 +1697,10 @@ function onPrimary(){
   }
 }
 /* ---- Prüfung: freie Navigation, Übersicht & Abgabe ---- */
-function examGoTo(i, scrollTop){
+function examGoTo(i){
   session.items[session.idx].submitted=true;   // = angesehen; Antworten bleiben bis zur Abgabe änderbar
   session.idx=Math.max(0, Math.min(session.items.length-1, i));
   renderQuestion();
-  if(scrollTop) window.scrollTo(0,0);
 }
 function setNavOpen(open){
   $("#navPanel").classList.toggle("hidden", !open);
@@ -1719,7 +1718,7 @@ function renderNav(){
     b.textContent=i+1;
     b.title="Frage "+(i+1)+(ans?" · beantwortet":" · offen")+(x.unsure?" · unsicher":"");
     if(i===session.idx) b.setAttribute("aria-current","true");
-    b.onclick=()=>{ setNavOpen(false); examGoTo(i, true); };
+    b.onclick=()=>examGoTo(i);   // Übersicht bleibt offen – schließen nur manuell
     g.appendChild(b);
   });
 }
