@@ -248,7 +248,7 @@
       <button class="btn secondary" id="toggleReviewBtn">Alle Fragen anzeigen</button>
       <div class="row" style="margin-top:10px">
         <button class="btn ghost" id="copyResBtn">📋 Kopieren</button>
-        <button class="btn ghost" id="exportResBtn">⬇ Als Text</button>
+        <button class="btn ghost" id="exportResBtn">⬇ Als JSON</button>
       </div>
       <div id="reviewWrap" class="hidden" style="margin-top:14px">
         <div class="chips" id="reviewFilter"></div>
@@ -1700,7 +1700,7 @@ function finishQuiz(){
     const usedMs = session.durationMs ? Math.min(session.durationMs, session.durationMs-Math.max(0, session.endsAt-Date.now())) : 0;
     $("#resDetail").textContent = round1(earned)+" von "+maxpts+" Punkten · Zeit: "+fmtTime(usedMs)+" min · 60 % nötig (offizielle iSAQB-Bewertung).";
     Object.keys(byCh).sort().forEach(c=>{ const o=byCh[c]; const p=o.m?Math.round(o.e/o.m*100):0; box.appendChild(barRow("K"+c, p, round1(o.e)+"/"+o.m+" P.")); });
-    lastResult={items:session.items, earned, maxpts, pct, pass, usedMs, byCh, at:new Date()};
+    lastResult={items:session.items, earned, maxpts, pct, pass, usedMs, durationMs:session.durationMs, byCh, at:new Date()};
     renderReviewCard();
   } else {
     const correct=session.items.filter(x=>x.correct===true).length;
@@ -1721,10 +1721,9 @@ function barRow(name,pct,right){
   return row;
 }
 
-/* ---- Auswertung: alle Prüfungsfragen inkl. 🎲-Markierung, Kopieren & Text-Export ---- */
+/* ---- Auswertung: alle Prüfungsfragen inkl. 🎲-Markierung, Kopieren & JSON-Export ---- */
 let lastResult=null, reviewFilter="all";
 const RV_LABEL={ok:"✓ richtig", part:"◐ teilweise", no:"✕ falsch", none:"– nicht beantwortet"};
-const TXT_LABEL={ok:"richtig", part:"teilweise", no:"falsch", none:"nicht beantwortet"};
 function reviewInfo(it){
   const q=it.q, p=questionPoints(q);
   // gleiche Basis wie die Punktewertung: nicht abgegebene Fragen zählen als leer
@@ -1734,14 +1733,14 @@ function reviewInfo(it){
   const key = !answered ? "none" : (isCorrect(q, sel) ? "ok" : (sc>0 ? "part" : "no"));
   return {sel, sc, p, key};
 }
-function unsureSummary(icon){
+function unsureSummary(){
   const uns=lastResult.items.filter(it=>it.unsure).map(reviewInfo);
-  if(!uns.length) return icon ? "Keine Frage als unsicher (🎲) markiert." : "Keine Frage als unsicher markiert.";
+  if(!uns.length) return "Keine Frage als unsicher (🎲) markiert.";
   const n=k=>uns.filter(x=>x.key===k).length;
-  return (icon?"🎲 ":"")+uns.length+" als unsicher markiert · davon "+n("ok")+" richtig, "+n("part")+" teilweise, "+(n("no")+n("none"))+" falsch/leer.";
+  return "🎲 "+uns.length+" als unsicher markiert · davon "+n("ok")+" richtig, "+n("part")+" teilweise, "+(n("no")+n("none"))+" falsch/leer.";
 }
 function renderReviewCard(){
-  $("#resUnsureInfo").textContent=unsureSummary(true);
+  $("#resUnsureInfo").textContent=unsureSummary();
   reviewFilter="all";
   $("#reviewWrap").classList.add("hidden");
   $("#toggleReviewBtn").textContent="Alle Fragen anzeigen";
@@ -1806,35 +1805,52 @@ function reviewItemEl(it, idx, inf){
   }
   return el;
 }
-function resultText(){
-  const r=lastResult, L=[];
-  L.push("iSAQB CPSA-F Trainer – Prüfungssimulation");
-  L.push("Datum: "+r.at.toLocaleString("de-DE"));
-  L.push("Ergebnis: "+r.pct+" % – "+(r.pass?"Bestanden (≥ 60 %)":"Nicht bestanden (< 60 %)"));
-  L.push("Punkte: "+round1(r.earned)+" von "+r.maxpts+" · Zeit: "+fmtTime(r.usedMs)+" min");
-  L.push(unsureSummary(false));
-  L.push("", "Ergebnis pro Kapitel:");
-  Object.keys(r.byCh).sort().forEach(c=>{ const o=r.byCh[c];
-    L.push("  K"+c+" "+CHAPTERS[c]+": "+round1(o.e)+"/"+o.m+" P. ("+(o.m?Math.round(o.e/o.m*100):0)+" %)"); });
-  L.push("", "Legende: [x] = deine Auswahl · (richtig) = korrekte Antwort");
-  r.items.forEach((it,i)=>{
+/* Maschinenlesbarer Export (z. B. für Agenten/Skripte): feste englische Feldnamen, Inhalte auf Deutsch.
+   Jede Frage trägt status, unsure und Punkte direkt; die Legende im Export erklärt alle Werte. */
+function resultData(){
+  const r=lastResult, r2=x=>Math.round(x*100)/100;
+  const STATUS={ok:"correct", part:"partial", no:"wrong", none:"unanswered"};
+  const questions=r.items.map((it,i)=>{
     const q=it.q, inf=reviewInfo(it);
-    L.push("", "----------------------------------------");
-    L.push((i+1)+". "+TXT_LABEL[inf.key]+" · "+round1(inf.sc)+"/"+inf.p+" P."+(it.unsure?" · unsicher":"")+" · Kap. "+q.chapter+" · "+q.lz+" · "+q.r);
-    L.push(q.q);
+    const o={number:i+1, id:q.id, type:q.type==="k"?"K":(q.correct.length>1?"P":"A"),
+      status:STATUS[inf.key], unsure:!!it.unsure, pointsEarned:r2(inf.sc), pointsMax:inf.p,
+      chapter:q.chapter, chapterName:CHAPTERS[q.chapter], learningGoal:q.lz, relevance:q.r, question:q.q};
     if(q.type==="k"){
-      q.rows.forEach((row,ri)=>{
-        const s=inf.sel[ri];
-        L.push("  - "+row.text);
-        L.push("    Deine Wahl: "+(s==null?"keine":q.categories[s])+" – "+(s===row.cat?"richtig":(s==null?"leer":"falsch")+", richtig: "+q.categories[row.cat]));
-      });
+      o.categories=q.categories.slice();
+      o.rows=q.rows.map((row,ri)=>{ const s=inf.sel[ri];
+        return {statement:row.text, selected:s==null?null:q.categories[s], correct:q.categories[row.cat],
+          result:s==null?"unanswered":(s===row.cat?"correct":"wrong")}; });
     } else {
-      it.order.forEach(oi=>L.push("  ["+(inf.sel.includes(oi)?"x":" ")+"] "+q.options[oi]+(q.correct.includes(oi)?"  (richtig)":"")));
+      o.selectCount=q.correct.length;
+      o.options=it.order.map((oi,pos)=>({key:String.fromCharCode(65+pos), text:q.options[oi],
+        selected:inf.sel.includes(oi), correct:q.correct.includes(oi)}));
+      o.selectedKeys=o.options.filter(x=>x.selected).map(x=>x.key);
+      o.correctKeys=o.options.filter(x=>x.correct).map(x=>x.key);
     }
-    if(q.explanation) L.push("Erklärung: "+q.explanation);
+    o.explanation=q.explanation||"";
+    return o;
   });
-  return L.join("\n");
+  const tally=arr=>{ const n=s=>arr.filter(x=>x.status===s).length;
+    return {total:arr.length, correct:n("correct"), partial:n("partial"), wrong:n("wrong"), unanswered:n("unanswered")}; };
+  return {
+    format:"isaqb-cpsa-f-trainer/exam-result", formatVersion:1,
+    app:"iSAQB CPSA-F Trainer (inoffizielles Lernwerkzeug)", mode:"exam", finishedAt:r.at.toISOString(),
+    legend:{
+      type:"A = genau eine richtige Antwort · P = mehrere richtige Antworten, genau selectCount wählen · K = jede Zeile (rows) einer Kategorie zuordnen",
+      status:"correct = volle Punkte · partial = Teilpunkte · wrong = 0 Punkte trotz Antwort · unanswered = keine Antwort abgegeben",
+      unsure:"true = während der Prüfung als unsicher markiert",
+      options:"key = Buchstabe in der angezeigten (ggf. gemischten) Reihenfolge · selected = eigene Auswahl · correct = richtige Antwort",
+      scoring:"Offizielle iSAQB-Bewertung: je richtiges Kreuz bzw. richtige Zeile +pointsMax/n, je falsches −pointsMax/n, minimal 0; mehr als selectCount Kreuze ergibt 0 Punkte"
+    },
+    summary:{scorePercent:r.pct, passed:r.pass, passThresholdPercent:60, pointsEarned:r2(r.earned), pointsMax:r.maxpts,
+      durationSeconds:Math.round(r.usedMs/1000), timeLimitSeconds:r.durationMs?Math.round(r.durationMs/1000):null,
+      questions:tally(questions), unsureQuestions:tally(questions.filter(x=>x.unsure))},
+    chapters:Object.keys(r.byCh).sort().map(c=>{ const x=r.byCh[c];
+      return {chapter:+c, name:CHAPTERS[c], pointsEarned:r2(x.e), pointsMax:x.m, percent:x.m?Math.round(x.e/x.m*100):0}; }),
+    questions
+  };
 }
+function resultJson(){ return JSON.stringify(resultData(), null, 2); }
 function legacyCopy(txt){
   const ta=document.createElement("textarea"); ta.value=txt; ta.setAttribute("readonly","");
   ta.style.position="fixed"; ta.style.top="-1000px"; ta.style.opacity="0";
@@ -1847,9 +1863,9 @@ function copyText(txt){
     return navigator.clipboard.writeText(txt).then(()=>true, ()=>legacyCopy(txt));
   return Promise.resolve(legacyCopy(txt));
 }
-function downloadText(txt, name){
+function downloadFile(txt, name, type){
   try{
-    const url=URL.createObjectURL(new Blob(["﻿"+txt],{type:"text/plain;charset=utf-8"}));
+    const url=URL.createObjectURL(new Blob([txt],{type:type+";charset=utf-8"}));
     const a=document.createElement("a"); a.href=url; a.download=name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(url), 1000);
@@ -1950,7 +1966,7 @@ $("#toggleReviewBtn").onclick=()=>{
 };
 $("#copyResBtn").onclick=()=>{
   if(!lastResult) return;
-  copyText(resultText()).then(ok=>{
+  copyText(resultJson()).then(ok=>{
     const b=$("#copyResBtn"); b.textContent=ok?"✓ Kopiert":"✕ Fehlgeschlagen";
     setTimeout(()=>{ b.textContent="📋 Kopieren"; },1600);
   });
@@ -1958,7 +1974,7 @@ $("#copyResBtn").onclick=()=>{
 $("#exportResBtn").onclick=()=>{
   if(!lastResult) return;
   const d=lastResult.at, p=n=>String(n).padStart(2,"0");
-  downloadText(resultText(), "isaqb-pruefung-"+d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"-"+p(d.getHours())+p(d.getMinutes())+".txt");
+  downloadFile(resultJson(), "isaqb-pruefung-"+d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"-"+p(d.getHours())+p(d.getMinutes())+".json", "application/json");
 };
 $("#resumeBtn").onclick=()=>{ if(restoreSession()){ show("quiz"); renderQuestion(); startExamTimer(); } else { updateResumeBanner(); } };
 $("#discardBtn").onclick=()=>{ if(confirm("Unterbrochene Runde wirklich verwerfen?")){ clearSession(); updateResumeBanner(); } };
