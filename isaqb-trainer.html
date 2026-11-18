@@ -104,6 +104,8 @@
   .fixedbar .btn{margin-top:0}
   .bookmark{background:none;border:none;color:var(--muted);font-size:1.3rem;cursor:pointer;padding:4px 6px}
   .bookmark.on{color:var(--r2)}
+  .bookmark.dice{filter:grayscale(1);opacity:.4;font-size:1.15rem}
+  .bookmark.dice.on{filter:none;opacity:1}
   /* Stats */
   .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .stat{background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center}
@@ -118,6 +120,22 @@
   .result-big .score{font-size:2.6rem;font-weight:800}
   .result-big .pass{font-size:1rem;font-weight:700;margin-top:4px}
   .pass.ok{color:var(--correct)} .pass.no{color:var(--wrong)}
+  /* Auswertung: Fragen im Detail */
+  .rv-item{border:1px solid var(--border);border-left:4px solid var(--muted);border-radius:12px;padding:12px;margin-top:12px;background:var(--card)}
+  .rv-item.ok{border-left-color:var(--correct)} .rv-item.part{border-left-color:var(--r2)} .rv-item.no{border-left-color:var(--wrong)}
+  .rv-item .qmeta{flex-wrap:wrap;gap:4px 8px}
+  .rv-st.ok{color:var(--correct);border-color:var(--correct)} .rv-st.part{color:var(--r2);border-color:var(--r2)}
+  .rv-st.no{color:var(--wrong);border-color:var(--wrong)} .rv-st.none{color:var(--muted)}
+  .rv-unsure{color:var(--r2);border-color:var(--r2)}
+  .rv-q{font-weight:600;font-size:.95rem;margin:2px 0 8px}
+  .rv-item .opt{padding:9px 11px;margin-bottom:6px;font-size:.88rem}
+  .rv-item .opt .mark{width:18px;height:18px;font-size:.7rem}
+  .opt.miss{border-style:dashed;border-color:var(--correct)}
+  .opt.miss .mark{border-color:var(--correct);color:var(--correct)}
+  .rv-item .krow{padding:8px 10px;margin-bottom:6px}
+  .rv-item .kstmt{font-size:.86rem;margin-bottom:6px}
+  .rv-item .kcat{padding:7px 6px;font-size:.78rem}
+  .rv-item .explain{font-size:.84rem;padding:10px;margin-top:8px}
   footer.disc{color:var(--muted);font-size:.72rem;text-align:center;margin-top:8px;padding:0 8px}
   a{color:var(--accent)}
   .hidden{display:none!important}
@@ -202,7 +220,7 @@
     <div class="card">
       <div class="qmeta" style="margin-bottom:6px">
         <span><span class="badge" id="qBadge">R1</span> <span class="pts" id="qPts" style="display:none"></span> <span class="lz" id="qChapter" style="margin:0"></span></span>
-        <button class="bookmark" id="qBookmark" title="Lesezeichen">☆</button>
+        <span style="white-space:nowrap"><button class="bookmark dice hidden" id="qUnsure" title="Unsicher" aria-label="Unsicher" aria-pressed="false">🎲</button><button class="bookmark" id="qBookmark" title="Lesezeichen">☆</button></span>
       </div>
       <div class="qtext" id="qText"></div>
       <div class="qtype" id="qType"></div>
@@ -223,6 +241,20 @@
     <div class="card">
       <h2>Ergebnis pro Kapitel</h2>
       <div id="resByChapter"></div>
+    </div>
+    <div class="card hidden" id="resReviewCard">
+      <h2>Fragen im Detail</h2>
+      <p class="hint" id="resUnsureInfo" style="margin:0 0 4px"></p>
+      <button class="btn secondary" id="toggleReviewBtn">Alle Fragen anzeigen</button>
+      <div class="row" style="margin-top:10px">
+        <button class="btn ghost" id="copyResBtn">📋 Kopieren</button>
+        <button class="btn ghost" id="exportResBtn">⬇ Als Text</button>
+      </div>
+      <div id="reviewWrap" class="hidden" style="margin-top:14px">
+        <div class="chips" id="reviewFilter"></div>
+        <p class="hint">Gefüllt = deine Auswahl · gestrichelt = richtige Antwort, nicht gewählt.</p>
+        <div id="reviewList"></div>
+      </div>
     </div>
     <button class="btn" id="againBtn">Neue Runde</button>
     <button class="btn secondary" id="reviewWrongBtn" style="margin-top:10px">Falsche wiederholen</button>
@@ -1765,7 +1797,7 @@ function hasSelection(it){ return it.q.type==="k" ? it.selected.some(x=>x!=null)
 function persistSession(){
   if(!session) return;
   store.session={ mode:session.mode, idx:session.idx,
-    items:session.items.map(it=>({id:it.q.id, order:it.order, selected:it.selected, submitted:it.submitted, correct:it.correct})) };
+    items:session.items.map(it=>({id:it.q.id, order:it.order, selected:it.selected, submitted:it.submitted, correct:it.correct, unsure:!!it.unsure})) };
   if(session.mode==="exam" && session.endsAt){ store.session.durationMs=session.durationMs; store.session.remainingMs=Math.max(0, session.endsAt-Date.now()); }
   saveStore();
 }
@@ -1777,7 +1809,7 @@ function restoreSession(){
     const q=QUESTIONS.find(x=>x.id===it.id); if(!q) continue;
     const defOrder = q.options ? q.options.map((_,i)=>i) : [];
     items.push({ q, order:(it.order&&q.options&&it.order.length===q.options.length)?it.order:defOrder,
-      selected:it.selected||(q.type==="k"?new Array(q.rows.length).fill(null):[]), submitted:!!it.submitted, correct:(it.correct===undefined?null:it.correct) });
+      selected:it.selected||(q.type==="k"?new Array(q.rows.length).fill(null):[]), submitted:!!it.submitted, correct:(it.correct===undefined?null:it.correct), unsure:!!it.unsure });
   }
   if(!items.length){ clearSession(); return false; }
   session={ mode:s.mode||"practice", items, idx:Math.min(s.idx||0, items.length-1) };
@@ -1852,7 +1884,7 @@ function buildSession(subset){
     items:pool.map(q=>{
       let order = q.options ? q.options.map((_,i)=>i) : [];
       if(ui.shuffleOpts && q.options) order=shuffle(order);
-      return {q, order, selected: q.type==="k" ? new Array(q.rows.length).fill(null) : [], submitted:false, correct:null};
+      return {q, order, selected: q.type==="k" ? new Array(q.rows.length).fill(null) : [], submitted:false, correct:null, unsure:false};
     }),
     idx:0
   };
@@ -1888,6 +1920,13 @@ function renderQuestion(){
   const bm=$("#qBookmark"); const isBm=qStat(q.id).bm;
   bm.textContent = isBm?"★":"☆"; bm.classList.toggle("on", isBm);
   bm.onclick=()=>{ const s=qStat(q.id); s.bm=!s.bm; saveStore(); renderQuestion(); };
+
+  // 🎲 Unsicher-Markierung (nur in der Prüfungssimulation)
+  const un=$("#qUnsure");
+  un.classList.toggle("hidden", session.mode!=="exam");
+  un.classList.toggle("on", !!it.unsure);
+  un.setAttribute("aria-pressed", it.unsure?"true":"false");
+  un.onclick=()=>{ it.unsure=!it.unsure; renderQuestion(); };
 
   const list=$("#optList"); list.innerHTML="";
   if(q.type==="k"){ renderKRows(it, list); }
@@ -2021,6 +2060,7 @@ function finishQuiz(){
   if(exam){ session.items.forEach(it=>{ if(it.submitted) recordStat(it); }); }
   const total=session.items.length;
   const box=$("#resByChapter"); box.innerHTML="";
+  $("#resReviewCard").classList.toggle("hidden", !exam);
 
   if(exam){
     let earned=0, maxpts=0; const byCh={};
@@ -2036,6 +2076,8 @@ function finishQuiz(){
     const usedMs = session.durationMs ? Math.min(session.durationMs, session.durationMs-Math.max(0, session.endsAt-Date.now())) : 0;
     $("#resDetail").textContent = round1(earned)+" von "+maxpts+" Punkten · Zeit: "+fmtTime(usedMs)+" min · 60 % nötig (offizielle iSAQB-Bewertung).";
     Object.keys(byCh).sort().forEach(c=>{ const o=byCh[c]; const p=o.m?Math.round(o.e/o.m*100):0; box.appendChild(barRow("K"+c, p, round1(o.e)+"/"+o.m+" P.")); });
+    lastResult={items:session.items, earned, maxpts, pct, pass, usedMs, byCh, at:new Date()};
+    renderReviewCard();
   } else {
     const correct=session.items.filter(x=>x.correct===true).length;
     const pct=Math.round(correct/total*100);
@@ -2053,6 +2095,141 @@ function barRow(name,pct,right){
   const row=document.createElement("div"); row.className="bar-row";
   row.innerHTML="<span class='name'>"+name+"</span><span class='bar'><i style='width:"+pct+"%'></i></span><span class='pct'>"+(right||pct+"%")+"</span>";
   return row;
+}
+
+/* ---- Auswertung: alle Prüfungsfragen inkl. 🎲-Markierung, Kopieren & Text-Export ---- */
+let lastResult=null, reviewFilter="all";
+const RV_LABEL={ok:"✓ richtig", part:"◐ teilweise", no:"✕ falsch", none:"– nicht beantwortet"};
+const TXT_LABEL={ok:"richtig", part:"teilweise", no:"falsch", none:"nicht beantwortet"};
+function reviewInfo(it){
+  const q=it.q, p=questionPoints(q);
+  // gleiche Basis wie die Punktewertung: nicht abgegebene Fragen zählen als leer
+  const sel = it.submitted ? it.selected : (q.type==="k" ? new Array(q.rows.length).fill(null) : []);
+  const answered = q.type==="k" ? sel.some(x=>x!=null) : sel.length>0;
+  const sc = scoreQuestion(q, sel);
+  const key = !answered ? "none" : (isCorrect(q, sel) ? "ok" : (sc>0 ? "part" : "no"));
+  return {sel, sc, p, key};
+}
+function unsureSummary(icon){
+  const uns=lastResult.items.filter(it=>it.unsure).map(reviewInfo);
+  if(!uns.length) return icon ? "Keine Frage als unsicher (🎲) markiert." : "Keine Frage als unsicher markiert.";
+  const n=k=>uns.filter(x=>x.key===k).length;
+  return (icon?"🎲 ":"")+uns.length+" als unsicher markiert · davon "+n("ok")+" richtig, "+n("part")+" teilweise, "+(n("no")+n("none"))+" falsch/leer.";
+}
+function renderReviewCard(){
+  $("#resUnsureInfo").textContent=unsureSummary(true);
+  reviewFilter="all";
+  $("#reviewWrap").classList.add("hidden");
+  $("#toggleReviewBtn").textContent="Alle Fragen anzeigen";
+  renderReviewList();
+}
+function renderReviewList(){
+  const items=lastResult.items, infos=items.map(reviewInfo);
+  const filters=[
+    ["all","Alle",()=>true],
+    ["wrong","✕ Falsch/teilweise",(it,inf)=>inf.key!=="ok"],
+    ["unsure","🎲 Unsicher",it=>!!it.unsure]];
+  const fbox=$("#reviewFilter"); fbox.innerHTML="";
+  filters.forEach(([key,label,fn])=>{
+    const c=document.createElement("span");
+    c.className="chip"+(reviewFilter===key?" active":"");
+    c.textContent=label+" ("+items.filter((it,i)=>fn(it,infos[i])).length+")";
+    c.onclick=()=>{ reviewFilter=key; renderReviewList(); };
+    fbox.appendChild(c);
+  });
+  const fn=filters.find(f=>f[0]===reviewFilter)[2];
+  const list=$("#reviewList"); list.innerHTML="";
+  items.forEach((it,i)=>{ if(fn(it,infos[i])) list.appendChild(reviewItemEl(it,i,infos[i])); });
+  if(!list.children.length) list.innerHTML="<p class='hint'>Keine Fragen in dieser Auswahl.</p>";
+}
+function reviewItemEl(it, idx, inf){
+  const q=it.q;
+  const el=document.createElement("div"); el.className="rv-item "+inf.key;
+  const head=document.createElement("div"); head.className="qmeta"; head.style.marginBottom="6px";
+  head.innerHTML="<span><b>"+(idx+1)+".</b> <span class='badge rv-st "+inf.key+"'>"+RV_LABEL[inf.key]+"</span> "+
+    "<span class='pts'>"+round1(inf.sc)+"/"+inf.p+" P.</span>"+(it.unsure?" <span class='badge rv-unsure' title='Unsicher' aria-label='Unsicher'>🎲</span>":"")+"</span>"+
+    "<span>Kap. "+q.chapter+" · "+escapeHtml(q.lz)+" · "+q.r+"</span>";
+  const qt=document.createElement("div"); qt.className="rv-q"; qt.textContent=q.q;
+  el.appendChild(head); el.appendChild(qt);
+  if(q.type==="k"){
+    q.rows.forEach((row,ri)=>{
+      const w=document.createElement("div"); w.className="krow";
+      const st=document.createElement("div"); st.className="kstmt"; st.textContent=row.text;
+      const cats=document.createElement("div"); cats.className="kcats";
+      q.categories.forEach((label,ci)=>{
+        const b=document.createElement("button"); b.className="kcat"; b.disabled=true; b.textContent=label;
+        const s=inf.sel[ri];
+        if(ci===row.cat) b.classList.add(s===ci?"correct":"miss");
+        else if(s===ci) b.classList.add("wrong");
+        cats.appendChild(b);
+      });
+      w.appendChild(st); w.appendChild(cats); el.appendChild(w);
+    });
+  } else {
+    it.order.forEach(oi=>{
+      const s=inf.sel.includes(oi), c=q.correct.includes(oi);
+      const o=document.createElement("div");
+      o.className="opt disabled"+(s&&c?" correct":(s?" wrong":(c?" miss":"")));
+      const m=document.createElement("span"); m.className="mark"; m.textContent=c?"✓":(s?"✕":"");
+      const t=document.createElement("span"); t.textContent=q.options[oi];
+      o.appendChild(m); o.appendChild(t); el.appendChild(o);
+    });
+  }
+  if(q.explanation){
+    const d=document.createElement("div"); d.className="explain";
+    d.innerHTML="<b>Erklärung</b>"+escapeHtml(q.explanation);
+    el.appendChild(d);
+  }
+  return el;
+}
+function resultText(){
+  const r=lastResult, L=[];
+  L.push("iSAQB CPSA-F Trainer – Prüfungssimulation");
+  L.push("Datum: "+r.at.toLocaleString("de-DE"));
+  L.push("Ergebnis: "+r.pct+" % – "+(r.pass?"Bestanden (≥ 60 %)":"Nicht bestanden (< 60 %)"));
+  L.push("Punkte: "+round1(r.earned)+" von "+r.maxpts+" · Zeit: "+fmtTime(r.usedMs)+" min");
+  L.push(unsureSummary(false));
+  L.push("", "Ergebnis pro Kapitel:");
+  Object.keys(r.byCh).sort().forEach(c=>{ const o=r.byCh[c];
+    L.push("  K"+c+" "+CHAPTERS[c]+": "+round1(o.e)+"/"+o.m+" P. ("+(o.m?Math.round(o.e/o.m*100):0)+" %)"); });
+  L.push("", "Legende: [x] = deine Auswahl · (richtig) = korrekte Antwort");
+  r.items.forEach((it,i)=>{
+    const q=it.q, inf=reviewInfo(it);
+    L.push("", "----------------------------------------");
+    L.push((i+1)+". "+TXT_LABEL[inf.key]+" · "+round1(inf.sc)+"/"+inf.p+" P."+(it.unsure?" · unsicher":"")+" · Kap. "+q.chapter+" · "+q.lz+" · "+q.r);
+    L.push(q.q);
+    if(q.type==="k"){
+      q.rows.forEach((row,ri)=>{
+        const s=inf.sel[ri];
+        L.push("  - "+row.text);
+        L.push("    Deine Wahl: "+(s==null?"keine":q.categories[s])+" – "+(s===row.cat?"richtig":(s==null?"leer":"falsch")+", richtig: "+q.categories[row.cat]));
+      });
+    } else {
+      it.order.forEach(oi=>L.push("  ["+(inf.sel.includes(oi)?"x":" ")+"] "+q.options[oi]+(q.correct.includes(oi)?"  (richtig)":"")));
+    }
+    if(q.explanation) L.push("Erklärung: "+q.explanation);
+  });
+  return L.join("\n");
+}
+function legacyCopy(txt){
+  const ta=document.createElement("textarea"); ta.value=txt; ta.setAttribute("readonly","");
+  ta.style.position="fixed"; ta.style.top="-1000px"; ta.style.opacity="0";
+  document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, txt.length);
+  let ok=false; try{ ok=document.execCommand("copy"); }catch(e){}
+  document.body.removeChild(ta); return ok;
+}
+function copyText(txt){
+  if(navigator.clipboard && window.isSecureContext)
+    return navigator.clipboard.writeText(txt).then(()=>true, ()=>legacyCopy(txt));
+  return Promise.resolve(legacyCopy(txt));
+}
+function downloadText(txt, name){
+  try{
+    const url=URL.createObjectURL(new Blob(["﻿"+txt],{type:"text/plain;charset=utf-8"}));
+    const a=document.createElement("a"); a.href=url; a.download=name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  }catch(e){ alert("Export nicht möglich – bitte „Kopieren“ verwenden."); }
 }
 
 /* ============================================================
@@ -2142,6 +2319,22 @@ $("#reviewWrongBtn").onclick=()=>{
   $$("#modeSeg button").forEach(x=>x.classList.toggle("active", x.dataset.mode==="practice"));
   $("#modeHint").textContent="Üben: sofortiges Feedback mit Erklärung nach jeder Frage.";
   ui.num=wrong.length; buildSession(wrong);
+};
+$("#toggleReviewBtn").onclick=()=>{
+  const open=!$("#reviewWrap").classList.toggle("hidden");
+  $("#toggleReviewBtn").textContent=open?"Fragen ausblenden":"Alle Fragen anzeigen";
+};
+$("#copyResBtn").onclick=()=>{
+  if(!lastResult) return;
+  copyText(resultText()).then(ok=>{
+    const b=$("#copyResBtn"); b.textContent=ok?"✓ Kopiert":"✕ Fehlgeschlagen";
+    setTimeout(()=>{ b.textContent="📋 Kopieren"; },1600);
+  });
+};
+$("#exportResBtn").onclick=()=>{
+  if(!lastResult) return;
+  const d=lastResult.at, p=n=>String(n).padStart(2,"0");
+  downloadText(resultText(), "isaqb-pruefung-"+d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"-"+p(d.getHours())+p(d.getMinutes())+".txt");
 };
 $("#resumeBtn").onclick=()=>{ if(restoreSession()){ show("quiz"); renderQuestion(); startExamTimer(); } else { updateResumeBanner(); } };
 $("#discardBtn").onclick=()=>{ if(confirm("Unterbrochene Runde wirklich verwerfen?")){ clearSession(); updateResumeBanner(); } };
